@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Text;
 using System.Xml;
+using System.Xml.Linq;
 
 namespace Noptis.RoiClient.FromPubTrans
 {
@@ -9,13 +10,16 @@ namespace Noptis.RoiClient.FromPubTrans
     {
         public List<UpdatedArrival> Arrivals { get; set; } = new List<UpdatedArrival>();
 
-        public override void ReadXmlElements(XmlReader xmlReader)
+        public override void ReadXmlElement(XElement el)
         {
-            while (xmlReader.LocalName == "Arrival") {
-                var arrival = new UpdatedArrival();
-                arrival.ReadXml(xmlReader);
-                Arrivals.Add(arrival);
-             }
+            switch (el.Name.LocalName)
+            {
+                case "Arrival":
+                    var arrival = new UpdatedArrival();
+                    arrival.ReadXml(el);
+                    Arrivals.Add(arrival);
+                    break;
+            }
         }
     }
 }

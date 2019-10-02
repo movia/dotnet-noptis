@@ -1,4 +1,5 @@
 ﻿using System.Xml;
+using System.Xml.Linq;
 
 namespace Noptis.RoiClient.FromPubTrans
 {
@@ -8,11 +9,12 @@ namespace Noptis.RoiClient.FromPubTrans
         public string Text { get; set; }
         public string Code { get; set; }
 
-        public override void ReadXmlAttributes(XmlReader xmlReader)
+        public override void ReadXml(XElement xml)
         {
-            Type = xmlReader.GetAttribute("Type");
-            Text = xmlReader.GetAttribute("Text");
-            Code = xmlReader.GetAttribute("Code");
+            base.ReadXml(xml);
+            Type = xml.Attribute("Type")?.Value;
+            Text = xml.Attribute("Text")?.Value;
+            Code = xml.Attribute("Code")?.Value;
         }
     }
 }

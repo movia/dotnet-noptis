@@ -1,6 +1,7 @@
 ﻿using System;
 using System.IO;
 using System.Xml;
+using System.Xml.Linq;
 
 namespace Noptis.RoiClient
 {
@@ -27,18 +28,21 @@ namespace Noptis.RoiClient
             return stringWriter.ToString();
         }
 
-        public virtual void ReadXml(XmlReader xmlReader)
+        public virtual void ReadXml(XElement xml)
         {
-            if (long.TryParse(xmlReader.GetAttribute("MessageId"), out long mesageId))
+            if (long.TryParse(xml.Attribute("MessageId")?.Value, out long mesageId))
                 MessageId = mesageId;
-            ReadXmlAttributes(xmlReader);
-            xmlReader.Read();
-            ReadXmlElements(xmlReader);
+
+            foreach (XAttribute attr in xml.Attributes())
+                ReadXmlAttribute(attr);
+
+            foreach (XElement el in xml.Elements())
+                ReadXmlElement(el);
         }
+        
+        public virtual void ReadXmlAttribute(XAttribute attr) { }
 
-        public virtual void ReadXmlAttributes(XmlReader xmlReader) { }
-
-        public virtual void ReadXmlElements(XmlReader xmlReader) { }
+        public virtual void ReadXmlElement(XElement xmlReader) { }
 
         public virtual void WriteXml(XmlWriter xmlWriter)
         {

@@ -24,35 +24,52 @@ namespace Noptis.RoiClient.FromPubTrans
 
         public long? TimetabledJourneyPatternPointGid { get; set; }
 
-        public override void ReadXmlAttributes(XmlReader xmlReader)
+        public override void ReadXmlAttribute(XAttribute attr)
         {
-            if (long.TryParse(xmlReader.GetAttribute("Id"), out var id))
-                Id = id;
-            if (DateTimeOffset.TryParse(xmlReader.GetAttribute("Timestamp"), out var timestamp))
-                Timestamp = timestamp;
-            if (DateTimeOffset.TryParse(xmlReader.GetAttribute("TargetDateTime"), out var targetDateTime))
-                TargetDateTime = targetDateTime;
-            if (DateTimeOffset.TryParse(xmlReader.GetAttribute("EstimatedDateTime"), out var estimatedDateTime))
-                EstimatedDateTime = estimatedDateTime;
-            if (DateTimeOffset.TryParse(xmlReader.GetAttribute("ObservedDateTime"), out var observedDateTime))
-                ObservedDateTime = observedDateTime;
-
-            State = xmlReader.GetAttribute("State");
-            /*
-            using (var xmlSubTreeReader = xmlReader.ReadSubtree())
+            switch (attr.Name.LocalName)
             {
-                var doc = XDocument.Load(xmlSubTreeReader);
-
-                if (long.TryParse(doc.Root.Element("MonitoredVehicleJourneyRef")?.Attribute("Id")?.Value, out var monitoredVehicleJourneyId))
-                    MonitoredVehicleJourneyId = monitoredVehicleJourneyId;
-
-                if (long.TryParse(doc.Root.Element("TargetJourneyPatternPointRef")?.Attribute("Gid")?.Value, out var targetJourneyPatternPointGid))
-                    TargetJourneyPatternPointGid = targetJourneyPatternPointGid;
-
-                if (long.TryParse(doc.Root.Element("TimetabledJourneyPatternPointRef")?.Attribute("Gid")?.Value, out var timetabledJourneyPatternPointGid))
-                    TimetabledJourneyPatternPointGid = timetabledJourneyPatternPointGid;
+                case "Id": 
+                    if (long.TryParse(attr.Value, out var id))
+                        Id = id;
+                    break;
+                case "Timestamp":
+                    if (DateTimeOffset.TryParse(attr.Value, out var timestamp))
+                        Timestamp = timestamp;
+                    break;
+                case "TargetDateTime":
+                    if (DateTimeOffset.TryParse(attr.Value, out var targetDateTime))
+                        TargetDateTime = targetDateTime;
+                    break;
+                case "EstimatedDateTime":
+                    if (DateTimeOffset.TryParse(attr.Value, out var estimatedDateTime))
+                        EstimatedDateTime = estimatedDateTime;
+                    break;
+                case "ObservedDateTime":
+                    if (DateTimeOffset.TryParse(attr.Value, out var observedDateTime))
+                        ObservedDateTime = observedDateTime;
+                    break;
+                case "State": State = attr.Value;
+                    break;
             }
-            */
+        }
+
+        public override void ReadXmlElement(XElement el)
+        {
+            switch (el.Name.LocalName)
+            {
+                case "MonitoredVehicleJourneyRef":
+                    if (long.TryParse(el.Attribute("Id")?.Value, out var monitoredVehicleJourneyId))
+                        MonitoredVehicleJourneyId = monitoredVehicleJourneyId;
+                    break;
+                case "TargetJourneyPatternPointRef":
+                    if (long.TryParse(el.Attribute("Gid")?.Value, out var targetJourneyPatternPointGid))
+                        TargetJourneyPatternPointGid = targetJourneyPatternPointGid;
+                    break;
+                case "TimetabledJourneyPatternPointRef":
+                    if (long.TryParse(el.Attribute("Gid")?.Value, out var timetabledJourneyPatternPointGid))
+                        TimetabledJourneyPatternPointGid = timetabledJourneyPatternPointGid;
+                    break;
+            }
         }
     }
 }

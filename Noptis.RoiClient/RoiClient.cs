@@ -7,6 +7,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Xml;
+using System.Xml.Linq;
 
 namespace Noptis.RoiClient
 {
@@ -122,8 +123,12 @@ namespace Noptis.RoiClient
                             continue;
                         if (typeMap.TryGetValue(eventType, out var factory))
                         {
-                            entity = factory();
-                            entity.ReadXml(xmlReader);
+                            //using (var xmlSubTree = xmlReader.ReadSubtree())
+                            //{
+                                var document = (XElement)XDocument.ReadFrom(xmlReader);
+                                entity = factory();
+                                entity.ReadXml(document);
+                            //}
                             await HandleIncommingMessage(entity);
                             lastProcessedMessageId = entity.MessageId.Value;
                         }

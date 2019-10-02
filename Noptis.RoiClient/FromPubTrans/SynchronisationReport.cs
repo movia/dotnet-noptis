@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Xml;
+using System.Xml.Linq;
 
 namespace Noptis.RoiClient.FromPubTrans
 {
@@ -9,13 +10,15 @@ namespace Noptis.RoiClient.FromPubTrans
         public DateTime SynchronisedUptoUtcDateTime { get; set; }
         public string HasCompletedRecoveryPhase { get; set; }
 
-        public override void ReadXmlAttributes(XmlReader xmlReader)
+        public override void ReadXml(XElement xml)
         {
-            if (long.TryParse(xmlReader.GetAttribute("OnSubscriptionId"), out long onSubscriptionId))
+            base.ReadXml(xml);
+
+            if (long.TryParse(xml.Attribute("OnSubscriptionId")?.Value, out long onSubscriptionId))
                 OnSubscriptionId = onSubscriptionId;
-            if (DateTime.TryParse(xmlReader.GetAttribute("SynchronisedUptoUtcDateTime"), out DateTime synchronisedUptoUtcDateTime))
+            if (DateTime.TryParse(xml.Attribute("SynchronisedUptoUtcDateTime")?.Value, out DateTime synchronisedUptoUtcDateTime))
                 SynchronisedUptoUtcDateTime = DateTime.SpecifyKind(synchronisedUptoUtcDateTime, DateTimeKind.Utc);
-            HasCompletedRecoveryPhase = xmlReader.GetAttribute("HasCompletedRecoveryPhase");
+            HasCompletedRecoveryPhase = xml.Attribute("HasCompletedRecoveryPhase")?.Value;
         }
     }
 }

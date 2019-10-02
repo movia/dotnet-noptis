@@ -1,4 +1,5 @@
 ﻿using System.Xml;
+using System.Xml.Linq;
 
 namespace Noptis.RoiClient.FromPubTrans
 {
@@ -6,10 +7,16 @@ namespace Noptis.RoiClient.FromPubTrans
     {
         public long SubscriptionId { get; set; }
 
-        public override void ReadXmlAttributes(XmlReader xmlReader)
+        public override void ReadXmlAttribute(XAttribute attr)
         {
-            if (long.TryParse(xmlReader.GetAttribute("SubscriptionId"), out long subscriptionId))
-                SubscriptionId = subscriptionId;
+            switch (attr.Name.LocalName)
+            {
+                case "SubscriptionId":
+                    if (long.TryParse(attr.Value, out long subscriptionId))
+                        SubscriptionId = subscriptionId;
+                    break;
+            }
+
         }
     }
 }
