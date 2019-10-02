@@ -12,6 +12,9 @@ namespace Noptis.RoiClient
 {
     public class RoiClient
     {
+        private string server;
+        private int port;
+        private string peerId;
         private CancellationToken cancellationToken;
         private Socket socket;
         private NetworkStream stream;
@@ -28,9 +31,12 @@ namespace Noptis.RoiClient
             ConformanceLevel = ConformanceLevel.Fragment
         };
 
-    public RoiClient(CancellationToken cancellationToken)
+        public RoiClient(string server, int port, string peerId)
         {
-            this.cancellationToken = cancellationToken;
+            this.server = server;
+            this.port = port;
+            this.peerId = peerId;
+            // Register basic types for handking ROI stream
             RegisterType<FromPubTrans.SubscriptionResumeResponse>();
             RegisterType<FromPubTrans.SubscriptionErrorReport>();
             RegisterType<FromPubTrans.SynchronisationReport>();
@@ -53,7 +59,7 @@ namespace Noptis.RoiClient
             return null;
         }
 
-        private async Task Send(MessageBase msg)
+        public async Task Send(MessageBase msg)
         {
             var n = Interlocked.Increment(ref messageId);
             msg.MessageId = n;
@@ -162,41 +168,18 @@ namespace Noptis.RoiClient
 
         public bool TryTake(out MessageBase msg) => incomming.TryTake(out msg, 1000);
 
-        public void Start()
+        public void Start(CancellationToken cancellationToken)
         {
-            string server = "ptvtdartapp03.ptvt.local";
-            int port = 2345;
+            this.cancellationToken = cancellationToken;
 
             socket = ConnectSocket(server, port);
             stream = new NetworkStream(socket, true);
 
-            //writer = new StreamWriter(stream, encoding);            
             Task.Factory.StartNew(ProcessIncomming, TaskCreationOptions.LongRunning);
             Task.Run(async () =>
             {
                 await Send(@"<?xml version=""1.0"" encoding=""iso-8859-1"" ?>");
-                await Send(@"<ROI:ToPubTransMessages xmlns:ROI=""http://www.pubtrans.com/ROI/3.0"" DocumentLayoutVersion=""3.0.7"" PeerId=""BI-TEST"" MaxMessageInterval=""PT90S"">");
-                //await Send(msg_id => $"<SubscriptionRequest MessageId=\"{msg_id}\"> <VehicleJourneyEventSelection LookAheadDuration=\"PT3H\" ExpandLineData=\"Y\" ExpandVehicleOperatorData=\"Y\"> <ScopeElements> <ScopeElement/> </ScopeElements> </VehicleJourneyEventSelection> <AssignmentEventSelection/> </SubscriptionRequest>");
-                /*
-                await Send(
-                    new ToPubTrans.SubscriptionUpdateRequest
-                    {
-                        VehicleJourneyEventSelection = new ToPubTrans.VehicleJourneyEventSelection
-                        {
-                            LookAheadDuration = "PT3H",
-                            ExpandLineData = true,
-                            ExpandVehicleOperatorData = true,
-                            ScopeElements = new ToPubTrans.ScopeElements
-                            {
-                                new ToPubTrans.ScopeElement()
-                            }
-                        },
-                        AssignmentEventSelection = new ToPubTrans.AssignmentEventSelection(),
-                    });
-                */
-                //ait Send(new ToPubTrans.SubscriptionResumeRequest { StartUtcDateTime = DateTime.UtcNow, SynchronisedUptoUtcDateTime = DateTime.UtcNow.Date.AddDays(-1) });
-                await Send(new ToPubTrans.SubscriptionResumeRequest { StartUtcDateTime = DateTime.UtcNow, SynchronisedUptoUtcDateTime = DateTime.UtcNow.AddHours(-1) });
-                //await Send(new ToPubTrans.SubscriptionResumeRequest { });
+                await Send($"<ROI:ToPubTransMessages xmlns:ROI=\"http://www.pubtrans.com/ROI/3.0\" DocumentLayoutVersion=\"3.0.7\" PeerId=\"{peerId}\" MaxMessageInterval=\"PT90S\">");
                 await Task.Factory.StartNew(Idle, TaskCreationOptions.LongRunning);
             });
 
