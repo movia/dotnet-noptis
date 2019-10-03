@@ -1,4 +1,4 @@
-# NOPIS .NET
+# NOPTIS .NET
 An free and open source implementaions of the NOPTIS standards for .NET Standard 2.1.
 
 ## What is NOPTIS?
@@ -11,6 +11,6 @@ The NOPTIS-standards support the interconnection of subsystems within a traffic 
 
 The NOPTIS organisation is formed to facilitate the use of the interfaces and to control future developments of the protocol.
 
-# What is NOPIS .NET
+# What is NOPTIS .NET
 
 Current scope is the Realtime Output Interface and Realtime Input Interface
