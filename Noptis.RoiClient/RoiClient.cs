@@ -9,10 +9,38 @@ using System.Threading.Tasks;
 using System.Xml;
 using System.Xml.Linq;
 
+using App.Metrics;
+using App.Metrics.Meter;
+using App.Metrics.Timer;
+
 namespace Noptis.RoiClient
 {
     public class RoiClient
     {
+        private readonly IMetrics metrics;
+        private readonly TimerOptions readerTimer = new TimerOptions
+        {
+            Name = "Inbound Reader Timer",
+            MeasurementUnit = Unit.Requests,
+            DurationUnit = TimeUnit.Milliseconds,
+            RateUnit = TimeUnit.Milliseconds
+        };
+
+        private readonly TimerOptions processTimer = new TimerOptions
+        {
+            Name = "Inbound Process Timer",
+            MeasurementUnit = Unit.Requests,
+            DurationUnit = TimeUnit.Milliseconds,
+            RateUnit = TimeUnit.Milliseconds
+        };
+
+        private readonly MeterOptions eventTypeMeter = new MeterOptions
+        {
+            Name = "Inbound Events",
+            MeasurementUnit = Unit.Events
+        };
+
+
         private string server;
         private int port;
         private string peerId;
@@ -23,7 +51,6 @@ namespace Noptis.RoiClient
         private long subscriptionId = 0;
         private long messageId = 0;
         private ConcurrentDictionary<string, Func<MessageBase>> typeMap = new ConcurrentDictionary<string, Func<MessageBase>>();
-        private ConcurrentDictionary<string, int> incomming_stats = new ConcurrentDictionary<string, int>();
         private BlockingCollection<MessageBase> incomming = new BlockingCollection<MessageBase>();
         private long lastProcessedMessageId;
         private DateTime synchronisedUptoUtcDateTime;
@@ -32,16 +59,18 @@ namespace Noptis.RoiClient
             ConformanceLevel = ConformanceLevel.Fragment
         };
 
-        public RoiClient(string server, int port, string peerId)
+        public RoiClient(string server, int port, string peerId, IMetrics metrics = null)
         {
             this.server = server;
             this.port = port;
             this.peerId = peerId;
-            // Register basic types for handking ROI stream
+            this.metrics = metrics;
+
+            // Register basic types for handling ROI stream ack.
             RegisterType<FromPubTrans.SubscriptionResumeResponse>();
             RegisterType<FromPubTrans.SubscriptionErrorReport>();
             RegisterType<FromPubTrans.SynchronisationReport>();
-            RegisterType<FromPubTrans.LastProcessedMessageRequest>();
+            RegisterType<FromPubTrans.LastProcessedMessageRequest>();            
         }
 
         private static Socket ConnectSocket(string server, int port)
@@ -87,13 +116,6 @@ namespace Noptis.RoiClient
             {
 
                 await Send(msg_id => $"<Idle MessageId=\"{msg_id}\"/>");
-
-                Console.WriteLine($"Queue stats: (in/out): {incomming.Count}");
-                Console.WriteLine($"Message stats:");
-                foreach ((string key, int value) in incomming_stats)
-                {
-                    Console.WriteLine($"- {key}: {value}");
-                }
                 await Task.Delay(30000);
             }
         }
@@ -104,11 +126,15 @@ namespace Noptis.RoiClient
             Console.WriteLine("Beginning processing of incomming messages.");
             while (!cancellationToken.IsCancellationRequested)
             {
-                var msg = await reader.ReadLineAsync();
+                string msg;
+                using (metrics.Measure.Timer.Time(readerTimer))
+                {
+                    msg = await reader.ReadLineAsync();
+                }
+
                 if (msg != null && msg.Length > 0)
                 {
-                    //Console.WriteLine(msg);
-                    //try { 
+                    using (metrics.Measure.Timer.Time(processTimer))                    
                     using (XmlReader xmlReader = XmlReader.Create(new StringReader(msg), xmlReaderSettings))
                     {
                         // Read until we get to an element
@@ -116,11 +142,10 @@ namespace Noptis.RoiClient
                             xmlReader.Read();
 
                         var eventType = xmlReader.LocalName;
+                        metrics.Measure.Meter.Mark(eventTypeMeter, eventType);
 
                         MessageBase entity = null;
 
-                        if (xmlReader.LocalName == "FromPubTransMessages")
-                            continue;
                         if (typeMap.TryGetValue(eventType, out var factory))
                         {
                             //using (var xmlSubTree = xmlReader.ReadSubtree())
@@ -132,14 +157,6 @@ namespace Noptis.RoiClient
                             await HandleIncommingMessage(entity);
                             lastProcessedMessageId = entity.MessageId.Value;
                         }
-                        else
-                        {
-                            if (!incomming_stats.ContainsKey(eventType))
-                                Console.WriteLine(msg);
-                        }
-
-                        // Update stats
-                        incomming_stats.AddOrUpdate(eventType, 1, (_, x) => x + 1);
                     }
                 }
             }
