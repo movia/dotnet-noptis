@@ -13,10 +13,13 @@ using App.Metrics;
 using App.Metrics.Meter;
 using App.Metrics.Timer;
 
+using Microsoft.Extensions.Logging;
+
 namespace Noptis.RoiClient
 {
     public class RoiClient
     {
+        private readonly ILogger<RoiClient> logger;
         private readonly IMetrics metrics;
         private readonly TimerOptions readerTimer = new TimerOptions
         {
@@ -59,11 +62,9 @@ namespace Noptis.RoiClient
             ConformanceLevel = ConformanceLevel.Fragment
         };
 
-        public RoiClient(string server, int port, string peerId, IMetrics metrics = null)
+        public RoiClient(ILogger<RoiClient> logger, IMetrics metrics)
         {
-            this.server = server;
-            this.port = port;
-            this.peerId = peerId;
+            this.logger = logger;
             this.metrics = metrics;
 
             // Register basic types for handling ROI stream ack.
@@ -73,14 +74,14 @@ namespace Noptis.RoiClient
             RegisterType<FromPubTrans.LastProcessedMessageRequest>();            
         }
 
-        private static Socket ConnectSocket(string server, int port)
+        private Socket ConnectSocket(string server, int port)
         {
             var addresses = Dns.GetHostAddresses(server);
             IPAddress address = addresses[0];
             IPEndPoint ipe = new IPEndPoint(address, port);
             Socket socket = new Socket(ipe.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
 
-            Console.WriteLine($"Connecting to {address} port {port}");
+            logger.LogInformation($"Connecting to {address} port {port}");
             socket.Connect(ipe);
 
             if (socket.Connected)
@@ -123,13 +124,25 @@ namespace Noptis.RoiClient
         private async void ProcessIncomming()
         {
             var reader = new StreamReader(stream, encoding);
-            Console.WriteLine("Beginning processing of incomming messages.");
+            logger.LogInformation("Beginning processing of incomming messages.");
             while (!cancellationToken.IsCancellationRequested)
             {
-                string msg;
+                string msg = null;
+
                 using (metrics.Measure.Timer.Time(readerTimer))
                 {
-                    msg = await reader.ReadLineAsync();
+                    try
+                    {
+                        msg = await reader.ReadLineAsync();
+                    }
+                    catch (SocketException ex)
+                    {
+                        /* This is likely to happen when we shut down, in that case do not log */
+                        if (!cancellationToken.IsCancellationRequested)
+                            logger.LogWarning(ex, "Error reading lines from network stream");
+
+                        continue;
+                    }
                 }
 
                 if (msg != null && msg.Length > 0)
@@ -184,15 +197,19 @@ namespace Noptis.RoiClient
             return LogInfo($"Synchronised upto {synchronisedUptoUtcDateTime} (HasCompletedRecoveryPhase: {synchronisationReport.HasCompletedRecoveryPhase})");
         }
 
-        private Task LogInfo(string msg) => Task.Run(() => Console.WriteLine(msg));
+        private Task LogInfo(string msg) => Task.Run(() => logger.LogInformation(msg));
 
         public void RegisterType<T>() where T : MessageBase, new() => typeMap.TryAdd(typeof(T).Name, () => new T());
 
         public bool TryTake(out MessageBase msg) => incomming.TryTake(out msg, 1000);
 
-        public void Start(CancellationToken cancellationToken)
+        public void Start(string server, int port, string peerId, CancellationToken cancellationToken)
         {
             this.cancellationToken = cancellationToken;
+
+            this.server = server;
+            this.port = port;
+            this.peerId = peerId;
 
             socket = ConnectSocket(server, port);
             stream = new NetworkStream(socket, true);
