@@ -48,19 +48,24 @@ namespace Noptis.RoiClient
         private int port;
         private string peerId;
         private CancellationToken cancellationToken;
+        private SemaphoreSlim sendSemaphore = new SemaphoreSlim(0, 1);
         private Socket socket;
         private NetworkStream stream;
         private Encoding encoding = Encoding.GetEncoding("iso-8859-1");
-        private long subscriptionId = 0;
         private long messageId = 0;
         private ConcurrentDictionary<string, Func<MessageBase>> typeMap = new ConcurrentDictionary<string, Func<MessageBase>>();
         private BlockingCollection<MessageBase> incomming = new BlockingCollection<MessageBase>();
         private long lastProcessedMessageId;
-        private DateTime synchronisedUptoUtcDateTime;
+        
+        
         private readonly XmlReaderSettings xmlReaderSettings = new XmlReaderSettings
         {
             ConformanceLevel = ConformanceLevel.Fragment
         };
+
+        public long? SubscriptionId { get; private set; } = null;
+
+        public DateTime SynchronisedUptoUtcDateTime { get; private set; } = DateTime.UtcNow.AddHours(-3);
 
         public RoiClient(ILogger<RoiClient> logger, IMetrics metrics)
         {
@@ -97,15 +102,22 @@ namespace Noptis.RoiClient
             await Send(msg.ToXmlString());
         }
 
-        private async Task Send(Func<long, string> msg)
-        {
-            var n = Interlocked.Increment(ref messageId);
-            await Send(msg(n));
-        }
-
         private async Task Send(string msg)
         {
-            //Console.WriteLine(msg);
+            await sendSemaphore.WaitAsync();
+            try
+            {
+                await SendInternal(msg);
+            }
+            finally
+            {
+                sendSemaphore.Release();
+            }
+        }
+
+        private async Task SendInternal(string msg)
+        {
+            logger.LogTrace($"OUT: {msg}");
             var data = encoding.GetBytes(msg);
             await stream.WriteAsync(data);
             await stream.FlushAsync();
@@ -115,62 +127,109 @@ namespace Noptis.RoiClient
         {
             while (!cancellationToken.IsCancellationRequested)
             {
-
-                await Send(msg_id => $"<Idle MessageId=\"{msg_id}\"/>");
                 await Task.Delay(30000);
+                await Send(new ToPubTrans.Idle());                
             }
         }
 
-        private async void ProcessIncomming()
+        private async Task TryCloseConnection()
         {
-            var reader = new StreamReader(stream, encoding);
-            logger.LogInformation("Beginning processing of incomming messages.");
+            await sendSemaphore.WaitAsync();
+            /* Try to gently send termination emssage */
+            try
+            {
+                await SendInternal(@"</ROI:ToPubTrlansMessages>");
+                stream.Close();
+                socket.Close();
+            }
+            catch (Exception) { } // Swallow exception as we really don't care if we suceeed to send the termination signal.
+        }
+
+
+        private async void MessageExchangeLoop()
+        {
+            int retryAttempt = 0;
+
             while (!cancellationToken.IsCancellationRequested)
             {
-                string msg = null;
-
-                using (metrics.Measure.Timer.Time(readerTimer))
+                try
                 {
-                    try
+                    socket = ConnectSocket(server, port);
+                    stream = new NetworkStream(socket, true);
+
+                    await SendInternal(@"<?xml version=""1.0"" encoding=""iso-8859-1"" ?>");
+                    await SendInternal($"<ROI:ToPubTransMessages xmlns:ROI=\"http://www.pubtrans.com/ROI/3.0\" DocumentLayoutVersion=\"3.0.7\" PeerId=\"{peerId}\" MaxMessageInterval=\"PT90S\">");
+                    sendSemaphore.Release(); /* Allows transmission to begin */
+
+                    await Send(new ToPubTrans.SubscriptionResumeRequest { StartUtcDateTime = DateTime.UtcNow, SynchronisedUptoUtcDateTime = SynchronisedUptoUtcDateTime });
+
+                    logger.LogInformation("Beginning processing of incomming messages.");
+                    var reader = new StreamReader(stream, encoding);
+                    while (!cancellationToken.IsCancellationRequested)
                     {
-                        msg = await reader.ReadLineAsync();
-                    }
-                    catch (SocketException ex)
-                    {
-                        /* This is likely to happen when we shut down, in that case do not log */
-                        if (!cancellationToken.IsCancellationRequested)
-                            logger.LogWarning(ex, "Error reading lines from network stream");
+                        string msg = null;
 
-                        continue;
-                    }
-                }
-
-                if (msg != null && msg.Length > 0)
-                {
-                    using (metrics.Measure.Timer.Time(processTimer))                    
-                    using (XmlReader xmlReader = XmlReader.Create(new StringReader(msg), xmlReaderSettings))
-                    {
-                        // Read until we get to an element
-                        while (xmlReader.NodeType != XmlNodeType.Element)
-                            xmlReader.Read();
-
-                        var eventType = xmlReader.LocalName;
-                        metrics.Measure.Meter.Mark(eventTypeMeter, eventType);
-
-                        MessageBase entity = null;
-
-                        if (typeMap.TryGetValue(eventType, out var factory))
+                        using (metrics.Measure.Timer.Time(readerTimer))
                         {
-                            //using (var xmlSubTree = xmlReader.ReadSubtree())
-                            //{
-                                var document = (XElement)XDocument.ReadFrom(xmlReader);
-                                entity = factory();
-                                entity.ReadXml(document);
-                            //}
-                            await HandleIncommingMessage(entity);
-                            lastProcessedMessageId = entity.MessageId.Value;
+                            try
+                            {
+                                msg = await reader.ReadLineAsync();
+                            }
+                            catch (Exception ex)
+                            {
+                                /* This is likely to happen when we shut down, in that case do not log */
+                                if (!cancellationToken.IsCancellationRequested)
+                                    logger.LogWarning(ex, "Error reading lines from network stream.");
+
+                                break;
+                            }
+                        }
+
+                        if (msg != null && msg.Length > 0)
+                        {
+                            logger.LogTrace($"IN: {msg}");
+
+                            if (msg.Equals("</ROI:FromPubTransMessages>"))
+                            {
+                                logger.LogInformation("Received termination signal. Rebooting.");
+                                break;
+                            }
+
+                            using (metrics.Measure.Timer.Time(processTimer))
+                            using (XmlReader xmlReader = XmlReader.Create(new StringReader(msg), xmlReaderSettings))
+                            {
+                                while (xmlReader.NodeType != XmlNodeType.Element)
+                                    xmlReader.Read();
+
+                                var eventType = xmlReader.LocalName;
+                                metrics.Measure.Meter.Mark(eventTypeMeter, eventType);
+
+                                if (typeMap.TryGetValue(eventType, out var factory))
+                                {
+                                    var document = (XElement)XNode.ReadFrom(xmlReader);
+                                    var entity = factory();
+                                    entity.ReadXml(document);
+
+                                    await HandleIncommingMessage(entity);
+                                    lastProcessedMessageId = entity.MessageId.Value;
+                                }
+
+                                /* We have sucessfullt processed a message - reset retry attempt */
+                                retryAttempt = 0;
+                            }
                         }
                     }
+                }
+                catch (Exception ex)
+                {
+                    retryAttempt++;
+                    var retryDelay = TimeSpan.FromSeconds(Math.Pow(2, retryAttempt));
+                    logger.LogError(ex, $"Exception en message exchange loop. Will attempt retry {retryAttempt} in {retryDelay}");
+                    await Task.Delay(retryDelay);
+                }
+                finally
+                {
+                    await TryCloseConnection();
                 }
             }
         }
@@ -184,21 +243,21 @@ namespace Noptis.RoiClient
                         OnMessageId = r.MessageId,
                         LastProcessedMessageId = lastProcessedMessageId
                     }),
-                FromPubTrans.SubscriptionErrorReport r => LogInfo(r.Text),
-                FromPubTrans.SubscriptionResumeResponse r => LogInfo($"Resuming subscription {r.SubscriptionId}"),
-                FromPubTrans.SynchronisationReport r => SetSynchronisedUptoUtcDateTime(r),
+                FromPubTrans.SubscriptionErrorReport r => Task.Run(() => logger.LogWarning($"Subscription Error: {r.Text}")),
+                FromPubTrans.SubscriptionResumeResponse r => Task.Run(() =>
+                {
+                    this.SubscriptionId = r.SubscriptionId;
+                    logger.LogInformation($"Resuming subscription {r.SubscriptionId}");
+                }),
+                FromPubTrans.SynchronisationReport r => Task.Run(() =>
+                {
+                    this.SynchronisedUptoUtcDateTime = r.SynchronisedUptoUtcDateTime;
+                    logger.LogInformation($"Synchronised upto {r.SynchronisedUptoUtcDateTime} (HasCompletedRecoveryPhase: {r.HasCompletedRecoveryPhase})");
+                }),        
                 _ => Task.Run(() => incomming.Add(m))
             };
         }
-
-        private Task SetSynchronisedUptoUtcDateTime(FromPubTrans.SynchronisationReport synchronisationReport)
-        {
-            this.synchronisedUptoUtcDateTime = synchronisationReport.SynchronisedUptoUtcDateTime;
-            return LogInfo($"Synchronised upto {synchronisedUptoUtcDateTime} (HasCompletedRecoveryPhase: {synchronisationReport.HasCompletedRecoveryPhase})");
-        }
-
-        private Task LogInfo(string msg) => Task.Run(() => logger.LogInformation(msg));
-
+        
         public void RegisterType<T>() where T : MessageBase, new() => typeMap.TryAdd(typeof(T).Name, () => new T());
 
         public bool TryTake(out MessageBase msg) => incomming.TryTake(out msg, 1000);
@@ -211,23 +270,8 @@ namespace Noptis.RoiClient
             this.port = port;
             this.peerId = peerId;
 
-            socket = ConnectSocket(server, port);
-            stream = new NetworkStream(socket, true);
-
-            Task.Factory.StartNew(ProcessIncomming, TaskCreationOptions.LongRunning);
-            Task.Run(async () =>
-            {
-                await Send(@"<?xml version=""1.0"" encoding=""iso-8859-1"" ?>");
-                await Send($"<ROI:ToPubTransMessages xmlns:ROI=\"http://www.pubtrans.com/ROI/3.0\" DocumentLayoutVersion=\"3.0.7\" PeerId=\"{peerId}\" MaxMessageInterval=\"PT90S\">");
-                await Task.Factory.StartNew(Idle, TaskCreationOptions.LongRunning);
-            });
-
-            cancellationToken.Register(async () =>
-            {
-                await Send(@"</ROI:ToPubTrlansMessages>");
-                stream.Close();
-                socket.Close();
-            });
+            Task.Factory.StartNew(MessageExchangeLoop, TaskCreationOptions.LongRunning);
+            Task.Factory.StartNew(Idle, TaskCreationOptions.LongRunning);           
         }
     }
 }

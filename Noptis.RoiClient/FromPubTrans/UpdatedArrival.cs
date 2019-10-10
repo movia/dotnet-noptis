@@ -28,27 +28,23 @@ namespace Noptis.RoiClient.FromPubTrans
         {
             switch (attr.Name.LocalName)
             {
-                case "Id": 
-                    if (long.TryParse(attr.Value, out var id))
-                        Id = id;
+                case "Id" when long.TryParse(attr.Value, out var id):
+                    Id = id;
                     break;
-                case "Timestamp":
-                    if (DateTimeOffset.TryParse(attr.Value, out var timestamp))
-                        Timestamp = timestamp;
+                case "Timestamp" when DateTimeOffset.TryParse(attr.Value, out var timestamp):
+                    Timestamp = timestamp;
                     break;
-                case "TargetDateTime":
-                    if (DateTimeOffset.TryParse(attr.Value, out var targetDateTime))
-                        TargetDateTime = targetDateTime;
+                case "TargetDateTime" when DateTimeOffset.TryParse(attr.Value, out var targetDateTime):
+                    TargetDateTime = targetDateTime;
                     break;
-                case "EstimatedDateTime":
-                    if (DateTimeOffset.TryParse(attr.Value, out var estimatedDateTime))
-                        EstimatedDateTime = estimatedDateTime;
+                case "EstimatedDateTime" when DateTimeOffset.TryParse(attr.Value, out var estimatedDateTime):
+                    EstimatedDateTime = estimatedDateTime;
                     break;
-                case "ObservedDateTime":
-                    if (DateTimeOffset.TryParse(attr.Value, out var observedDateTime))
-                        ObservedDateTime = observedDateTime;
+                case "ObservedDateTime" when DateTimeOffset.TryParse(attr.Value, out var observedDateTime):
+                    ObservedDateTime = observedDateTime;
                     break;
-                case "State": State = attr.Value;
+                case "State": 
+                    State = attr.Value;
                     break;
             }
         }
@@ -57,17 +53,14 @@ namespace Noptis.RoiClient.FromPubTrans
         {
             switch (el.Name.LocalName)
             {
-                case "MonitoredVehicleJourneyRef":
-                    if (long.TryParse(el.Attribute("Id")?.Value, out var monitoredVehicleJourneyId))
-                        MonitoredVehicleJourneyId = monitoredVehicleJourneyId;
+                case "MonitoredVehicleJourneyRef" when long.TryParse(el.Attribute("Id")?.Value, out var monitoredVehicleJourneyId):
+                    MonitoredVehicleJourneyId = monitoredVehicleJourneyId;
                     break;
-                case "TargetJourneyPatternPointRef":
-                    if (long.TryParse(el.Attribute("Gid")?.Value, out var targetJourneyPatternPointGid))
-                        TargetJourneyPatternPointGid = targetJourneyPatternPointGid;
+                case "TargetJourneyPatternPointRef" when long.TryParse(el.Attribute("Gid")?.Value, out var targetJourneyPatternPointGid):
+                    TargetJourneyPatternPointGid = targetJourneyPatternPointGid;
                     break;
-                case "TimetabledJourneyPatternPointRef":
-                    if (long.TryParse(el.Attribute("Gid")?.Value, out var timetabledJourneyPatternPointGid))
-                        TimetabledJourneyPatternPointGid = timetabledJourneyPatternPointGid;
+                case "TimetabledJourneyPatternPointRef" when long.TryParse(el.Attribute("Gid")?.Value, out var timetabledJourneyPatternPointGid):
+                    TimetabledJourneyPatternPointGid = timetabledJourneyPatternPointGid;
                     break;
             }
         }
