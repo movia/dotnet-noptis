@@ -4,13 +4,13 @@ using System.Xml.Linq;
 
 namespace Noptis.RoiClient.FromPubTrans
 {
-    public class Arrival : MessageBase
+    public class Departure : MessageBase
     {
         public long Id { get; set; }
         
         public DateTimeOffset Timestamp { get; set; }
 
-        public DateTimeOffset TimetabledLatestDateTime { get; set; }
+        public DateTimeOffset TimetabledEarliestDateTime { get; set; }
 
         public DateTimeOffset TargetDateTime { get; set; }
 
@@ -44,8 +44,8 @@ namespace Noptis.RoiClient.FromPubTrans
                 case "Timestamp":
                     Timestamp = XmlConvert.ToDateTimeOffset(attr.Value);
                     break;
-                case "TimetabledLatestDateTime":
-                    TimetabledLatestDateTime = XmlConvert.ToDateTimeOffset(attr.Value);
+                case "TimetabledEarliestDateTime":
+                    TimetabledEarliestDateTime = XmlConvert.ToDateTimeOffset(attr.Value);
                     break;
                 case "TargetDateTime":
                     TargetDateTime = XmlConvert.ToDateTimeOffset(attr.Value);
@@ -90,8 +90,8 @@ namespace Noptis.RoiClient.FromPubTrans
             }
         }
 
-        public void Update(UpdatedArrival updatedArrival)
-        {            
+        public void Update(UpdatedDeparture updatedArrival)
+        {
             EstimatedDateTime = updatedArrival.EstimatedDateTime;
             TargetDateTime = updatedArrival.TargetDateTime;
             ObservedDateTime = updatedArrival.ObservedDateTime;
