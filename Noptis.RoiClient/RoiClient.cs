@@ -42,13 +42,13 @@ namespace Noptis.RoiClient
             Name = "Inbound Events",
             MeasurementUnit = Unit.Events
         };
-
-
+        
         private string server;
         private int port;
         private string peerId;
         private CancellationToken cancellationToken;
         private SemaphoreSlim sendSemaphore = new SemaphoreSlim(0, 1);
+        
         private Socket socket;
         private NetworkStream stream;
         private Encoding encoding = Encoding.GetEncoding("iso-8859-1");
@@ -56,8 +56,8 @@ namespace Noptis.RoiClient
         private ConcurrentDictionary<string, Func<MessageBase>> typeMap = new ConcurrentDictionary<string, Func<MessageBase>>();
         private BlockingCollection<MessageBase> incomming = new BlockingCollection<MessageBase>();
         private long lastProcessedMessageId;
-        
-        
+
+        private readonly TimeSpan maxRetryDelay = TimeSpan.FromMinutes(15);
         private readonly XmlReaderSettings xmlReaderSettings = new XmlReaderSettings
         {
             ConformanceLevel = ConformanceLevel.Fragment
@@ -104,14 +104,17 @@ namespace Noptis.RoiClient
 
         private async Task Send(string msg)
         {
-            await sendSemaphore.WaitAsync();
-            try
+            var coconut = await sendSemaphore.WaitAsync(5000, cancellationToken);
+            if (coconut)
             {
-                await SendInternal(msg);
-            }
-            finally
-            {
-                sendSemaphore.Release();
+                try
+                {
+                    await SendInternal(msg);
+                }
+                finally
+                {
+                    sendSemaphore.Release();
+                }
             }
         }
 
@@ -127,24 +130,32 @@ namespace Noptis.RoiClient
         {
             while (!cancellationToken.IsCancellationRequested)
             {
-                await Task.Delay(30000);
-                await Send(new ToPubTrans.Idle());                
+                try
+                {
+                    await Task.Delay(30000, cancellationToken);
+                    if (!cancellationToken.IsCancellationRequested)
+                        await Send(new ToPubTrans.Idle());
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, $"Exception en idle loop.");
+                }
             }
         }
 
         private async Task TryCloseConnection()
         {
-            await sendSemaphore.WaitAsync();
-            /* Try to gently send termination emssage */
+            /* Try to gently send termination emssage */            
             try
             {
-                await SendInternal(@"</ROI:ToPubTrlansMessages>");
-                stream.Close();
-                socket.Close();
+                var coconut = await sendSemaphore.WaitAsync(5000, cancellationToken);
+                if (coconut)
+                    await SendInternal(@"</ROI:ToPubTrlansMessages>");
+                stream?.Close();
+                socket?.Close();
             }
             catch (Exception) { } // Swallow exception as we really don't care if we suceeed to send the termination signal.
         }
-
 
         private async void MessageExchangeLoop()
         {
@@ -219,17 +230,18 @@ namespace Noptis.RoiClient
                             }
                         }
                     }
+
+                    await TryCloseConnection();
                 }
                 catch (Exception ex)
-                {
+                {                    
                     retryAttempt++;
                     var retryDelay = TimeSpan.FromSeconds(Math.Pow(2, retryAttempt));
+                    if (retryDelay > maxRetryDelay)
+                        retryDelay = maxRetryDelay;
                     logger.LogError(ex, $"Exception en message exchange loop. Will attempt retry {retryAttempt} in {retryDelay}");
-                    await Task.Delay(retryDelay);
-                }
-                finally
-                {
                     await TryCloseConnection();
+                    await Task.Delay(retryDelay);
                 }
             }
         }
@@ -261,6 +273,8 @@ namespace Noptis.RoiClient
         public void RegisterType<T>() where T : MessageBase, new() => typeMap.TryAdd(typeof(T).Name, () => new T());
 
         public bool TryTake(out MessageBase msg) => incomming.TryTake(out msg, 1000);
+
+        public int QueueCount { get => incomming.Count; }
 
         public void Start(string server, int port, string peerId, CancellationToken cancellationToken)
         {
